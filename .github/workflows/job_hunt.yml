@@ -40,7 +40,7 @@ jobs:
       - name: Create output dir
         run: mkdir -p output config
 
-      # Resume is downloaded at runtime via RESUME_URL — nothing to do here
+      # Resume is downloaded at runtime via RESUME_URL - nothing to do here
 
       - name: Run job hunt pipeline
         env:
