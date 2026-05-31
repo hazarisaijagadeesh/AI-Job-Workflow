@@ -114,11 +114,28 @@ H1B_NEGATIVE = [
     "no visa", "citizens only", "us citizens and permanent residents only",
     "must have authorization to work", "no h1b"
 ]
-LOCATION_PATTERNS = [
+USA_PATTERNS = [
     r"\b(?:united states|united states of america|usa|u\.s\.a|u\.s\.|us|america)\b",
+    r"\b(?:new york|california|texas|florida|illinois|washington|seattle|san francisco|ny|ca|tx)\b",
+]
+
+INDIA_PATTERNS = [
     r"\b(?:india|indian)\b",
-    r"\b(?:new york|california|texas|florida|illinois|washington|seattle|san francisco|chennai|bangalore|mumbai|delhi|hyderabad|pune|kolkata|gurgaon|noida)\b",
-    r"\b(?:remote\s*(?:usa|us|india|indian)?)\b",
+    r"\b(?:chennai|bangalore|bangaluru|mumbai|delhi|hyderabad|pune|kolkata|gurgaon|noida)\b",
+]
+
+# allow remote only when explicitly mentioning US/India
+REMOTE_OK = [r"\bremote\b.*\b(?:usa|us|united states|india|indian)\b", r"\b(?:usa|india)\b.*\bremote\b"]
+
+ROLE_POSITIVE = [
+    "sdet", "software engineer in test", "qa automation", "test automation",
+    "quality engineer", "automation engineer", "qa engineer", "quality assurance",
+    "test engineer"
+]
+
+ROLE_NEGATIVE = [
+    "data scientist", "sales", "recruiter", "marketing", "human resources",
+    "hr", "accountant", "product manager", "business analyst"
 ]
 
 def normalize_text(text: str) -> str:
@@ -128,10 +145,31 @@ def normalize_text(text: str) -> str:
 def location_allowed(job: dict) -> bool:
     text = " ".join([
         job.get("title", ""), job.get("company", ""), job.get("snippet", ""),
-        job.get("source", ""), job.get("url", "")
+        job.get("source", ""), job.get("url", ""), job.get("location", "")
     ])
     text = normalize_text(text)
-    return any(re.search(pattern, text, re.I) for pattern in LOCATION_PATTERNS)
+
+    # explicit country match
+    if any(re.search(p, text, re.I) for p in USA_PATTERNS):
+        return True
+    if any(re.search(p, text, re.I) for p in INDIA_PATTERNS):
+        return True
+
+    # remote is allowed only if it explicitly mentions US/India
+    if any(re.search(p, text, re.I) for p in REMOTE_OK):
+        return True
+
+    return False
+
+
+def role_allowed(job: dict) -> bool:
+    """Return True if job title/snippet matches target roles (QA/SDET/test automation).
+    Also excludes clearly unrelated roles via ROLE_NEGATIVE."""
+    text = " ".join([job.get("title", ""), job.get("snippet", ""), job.get("company", "")])
+    text = normalize_text(text)
+    if any(neg in text for neg in ROLE_NEGATIVE):
+        return False
+    return any(p in text for p in ROLE_POSITIVE)
 # ─────────────────────────────────────────────
 # UTILITIES
 # ─────────────────────────────────────────────
@@ -774,8 +812,10 @@ def run_pipeline():
     log.info("STEP 4/5 — Filtering & shortlisting...")
     location_filtered = [j for j in scored_jobs if location_allowed(j)]
     log.info(f"  Location filtered (USA/India): {len(location_filtered)}")
+    role_filtered = [j for j in location_filtered if role_allowed(j)]
+    log.info(f"  Role filtered (QA/SDET/test automation): {len(role_filtered)}")
     shortlisted = [
-        j for j in location_filtered
+        j for j in role_filtered
         if j.get("score", 0) >= MIN_ATS_SCORE
         and j.get("h1b_likely", "unknown") == "yes"
     ]
