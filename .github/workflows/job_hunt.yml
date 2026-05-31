@@ -1,22 +1,29 @@
-name: H1B Job Hunt - Every 12 Hours
+name: H1B Job Hunt
+
 on:
+  workflow_dispatch:
   schedule:
     - cron: "0 6,18 * * *"
-  workflow_dispatch:
+
 jobs:
   hunt:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -r requirements.txt
+      - run: mkdir -p output config
       - run: python job_hunter.py
         env:
           YOUR_NAME: ${{ secrets.YOUR_NAME }}
           YOUR_EMAIL: ${{ secrets.YOUR_EMAIL }}
           GMAIL_APP_PASS: ${{ secrets.GMAIL_APP_PASS }}
           RESUME_URL: ${{ secrets.RESUME_URL }}
-
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: job-tracker-${{ github.run_number }}
+          path: output/job_tracker.xlsx
+          retention-days: 30
