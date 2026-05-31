@@ -114,7 +114,24 @@ H1B_NEGATIVE = [
     "no visa", "citizens only", "us citizens and permanent residents only",
     "must have authorization to work", "no h1b"
 ]
+LOCATION_PATTERNS = [
+    r"\b(?:united states|united states of america|usa|u\.s\.a|u\.s\.|us|america)\b",
+    r"\b(?:india|indian)\b",
+    r"\b(?:new york|california|texas|florida|illinois|washington|seattle|san francisco|chennai|bangalore|mumbai|delhi|hyderabad|pune|kolkata|gurgaon|noida)\b",
+    r"\b(?:remote\s*(?:usa|us|india|indian)?)\b",
+]
 
+def normalize_text(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip().lower())
+
+
+def location_allowed(job: dict) -> bool:
+    text = " ".join([
+        job.get("title", ""), job.get("company", ""), job.get("snippet", ""),
+        job.get("source", ""), job.get("url", "")
+    ])
+    text = normalize_text(text)
+    return any(re.search(pattern, text, re.I) for pattern in LOCATION_PATTERNS)
 # ─────────────────────────────────────────────
 # UTILITIES
 # ─────────────────────────────────────────────
@@ -138,6 +155,16 @@ def h1b_status(text: str) -> str:
     if any(p in t for p in H1B_POSITIVE):
         return "yes"
     return "unknown"
+
+
+def annotate_job(job: dict) -> dict:
+    """Add derived fields such as H1B sponsorship likelihood."""
+    text = " ".join([
+        job.get("title", ""), job.get("snippet", ""), job.get("company", ""),
+        job.get("source", ""), job.get("url", "")
+    ])
+    job["h1b_likely"] = h1b_status(text)
+    return job
 
 # ─────────────────────────────────────────────
 # SCRAPING
@@ -722,7 +749,7 @@ def run_pipeline():
 
     # 1. Scrape
     log.info("STEP 1/5 — Scraping career pages...")
-    raw_jobs = scrape_all_companies()
+    raw_jobs = [annotate_job(job) for job in scrape_all_companies()]
     log.info(f"  Total raw listings: {len(raw_jobs)}")
 
     # 2. De-duplicate
@@ -743,15 +770,17 @@ def run_pipeline():
     log.info("STEP 3/5 — ATS scoring with Claude...")
     scored_jobs = ats_score_batch(new_jobs)
 
-    # 4. Filter: H1B + ATS score threshold
+    # 4. Filter: USA / India + H1B + ATS score threshold
     log.info("STEP 4/5 — Filtering & shortlisting...")
+    location_filtered = [j for j in scored_jobs if location_allowed(j)]
+    log.info(f"  Location filtered (USA/India): {len(location_filtered)}")
     shortlisted = [
-        j for j in scored_jobs
+        j for j in location_filtered
         if j.get("score", 0) >= MIN_ATS_SCORE
-        and j.get("h1b_likely", "unknown") != "no"
+        and j.get("h1b_likely", "unknown") == "yes"
     ]
     shortlisted.sort(key=lambda x: x.get("score", 0), reverse=True)
-    log.info(f"  Shortlisted (score≥{MIN_ATS_SCORE}, H1B not blocked): {len(shortlisted)}")
+    log.info(f"  Shortlisted (score≥{MIN_ATS_SCORE}, H1B sponsorship likely): {len(shortlisted)}")
 
     # 5. Save all scored to Excel
     log.info("STEP 5/5 — Saving to Excel & sending emails...")
